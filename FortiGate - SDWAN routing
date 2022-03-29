@@ -1,0 +1,106 @@
+Technical Tip: Multiple default routes where SD-WAN rules are not preferred
+Description: 
+If there are multiple separate default routes e.g. Default route to sdwan interfaces and default routes via separate wan interfaces that are not part of sdwan, FIB lookup will take place and there is a possibility that traffic goes outbound via a non-sdwan interface.
+
+In such case, sdwan rules (proute) does not match/not taking preference over routing table.
+
+FIB lookup takes place that is pushing the traffic out of a non-sdwan interface.
+
+This behavior can be observed when wan interfaces part of sdwan are not present.
+
+Enable ‘set default enable’ and ‘set gateway enable’ under sdwan rules to avoid FIB lookup and ensure that sdwan rule matches and is preferred for the traffic.
+
+This article describes how to configure this feature.
+
+Solution
+1) Interface configuration.
+# config system interface
+    edit "wan"
+        set vdom "root"
+        set mode dhcp         Configured as dhcp so default route would be pushed
+        set allowaccess ping fgfm
+        set type physical
+        set role wan
+        set snmp-index 1
+    next
+
+    edit "wwan"
+        set vdom "root"
+        set mode dhcp         Configured as dhcp so default route would be pushed
+        set allowaccess ping fgfm
+        set type physical
+        set snmp-index 2
+    next
+
+2) SD-WAN configuration.
+
+WAN interfaces are not a part of sdwan.
+# config system virtual-wan-link
+    set status enable
+    config members
+        edit 1
+            set interface "HUB-X-1_0"
+            set gateway 172.16.1.1
+        next
+        edit 2
+            set interface "HUB-X-2_0"
+            set gateway 172.17.1.1
+        next
+        edit 5
+            set interface "HUB-Y-1_0"
+            set gateway 172.16.2.1
+        next
+        edit 6
+            set interface "HUB-Y-2_0"
+            set gateway 172.17.2.1
+        next
+    end
+3) AD-WAN rule.
+# config service
+    edit 1
+        set name "Web-server"
+        set mode sla
+        set dst "172.100.0.1"
+        set src "192.168.0.0/16"
+        set default enable                               <----- Set default set to enable.
+        set gateway enable                               <----- Set gateway set to enable.
+        set priority-members 5 1 6 2
+    next
+4) Static route.
+# config router static
+    edit 1
+        set distance 5
+        set virtual-wan-link enable
+    next
+end
+5) Routing table.
+S       0.0.0.0/0 [5/0] via 172.16.1.1, HUB-X-1_0 active   sdwan routes
+                  [5/0] via 172.17.1.1, HUB-X-2_0 active
+                  [5/0] via 172.16.2.1, HUB-Y-1_0 active
+                  [5/0] via 172.17.2.1, HUB-Y-2_0 active
+                  [5/0] via 1.1.1.1, wan active     wan interface routes
+                  [5/0] via 2.2.2.2, wwan active
+
+In the above configuration, there are 6 default routes for traffic:
+
+1) 4 via SD-WAN.
+2) 2 via dhcp wan interfaces.
+
+SD-WAN rule settings.
+
+1) set default disable and set gateway disable:
+
+- By default, in the sdwan rules ‘set default disable and set gateway disable’ are configured.
+Multiple default routes are present as per the above configuration, where the wan interfaces are not part of the sdwan, the FIB lookup takes place and it is not guaranteed that the traffic is forwarded via the sdwan member configured in the rule.
+The traffic is matching the FIB and uses and outbound interface accordingly.
+
+- In case all interfaces are present with default route as the sdwan member, the interface which is configured in the sdwan rule is used after the FIB lookup.
+
+
+
+2) Set default enable and set gateway enable.
+
+- With ‘set default enable’ and ‘set gateway enable’ as per the above config where the wan interfaces are not part of the sdwan, the traffic is skipping the FIB lookup and forwards it to the SD-WAN member configured in the rule.
+
+- If all interfaces are present with default route as the SD-WAN member, the interface that is configured in the SD-WAN rule is used as no FIB lookup is done.
+
